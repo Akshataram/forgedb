@@ -1,31 +1,23 @@
 # ForgeDB
 
-<!-- A one-sentence description that shows up under the repo name on GitHub -->
-A lightweight, modern database tool / local-first app for managing [your data / forge projects / whatever this actually is].
+Building a fast, crash-safe, embeddable key-value database from scratch in **pure Go** (no CGO).
 
-## ✨ Quick Look
+Inspired by:  
+- https://build-your-own.org/database (free Part I)  
+- HaloDB design principles
 
-- **Status**: Early development (Day 1 🚀)
-- **Goal**: [One-line vision — e.g. "Make forging/managing X fast, offline-first and beautiful."]
-- **Tech**: [e.g. Rust + Tauri, Go + Bubbletea, Python + Typer, Next.js + SQLite, etc. — fill this in!]
+**Goal**: Single-file B+Tree KV store with WAL, memtable, bloom filters, partitioning, crash recovery, and high test coverage — all in ~30 focused days.
 
-## 🚀 Getting Started
+**Current status**: Early foundation (page manager + basic node headers + persistence tests)
 
-### Prerequisites
+## Tech Stack (so far)
+- Go 1.21+
+- Only stdlib + minimal external deps later
 
-- [List the bare minimum, e.g.]
-  - Rust 1.75+ (if applicable)
-  - Node.js 20+ / pnpm / etc.
-  - macOS / Linux / Windows (cross-platform?)
-
-### Installation (for now — will improve)
+## Getting Started
 
 ```bash
-# Clone and enter the repo
-git clone https://github.com/yourusername/forgedb.git
+git clone https://github.com/Akshataram/forgedb.git
 cd forgedb
-
-# Install dependencies (example — change to your stack)
-# cargo build          # Rust
-# pnpm install         # Node
-# pip install -r requirements.txt   # Python
+go mod tidy
+go run cmd/forgedb/main.go mydb.db
