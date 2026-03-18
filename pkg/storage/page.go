@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	_ "unsafe"
 )
 
 const (
@@ -117,6 +119,17 @@ func NewEmptyLeaf() Page {
 	return p
 }
 
+// Get returns the value for the given key, or nil if not found
+func (p Page) Get(key []byte) ([]byte, bool) {
+	n := p.Nkeys()
+	for i := uint16(0); i < n; i++ {
+		k, v := p.GetKeyValueAt(i)
+		if bytes.Equal(k, key) {
+			return v, true
+		}
+	}
+	return nil, false
+}
 func (p Page) String() string {
 	n := p.Nkeys()
 	s := fmt.Sprintf("Page[type=%d, nkeys=%d]\n", p.NodeType(), n)
