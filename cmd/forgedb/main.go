@@ -10,8 +10,9 @@ import (
 func main() {
 	if len(os.Args) < 3 {
 		fmt.Println("Usage:")
-		fmt.Println("  go run cmd/forgedb/main.go <dbfile> put <key> <value>")
-		fmt.Println("  go run cmd/forgedb/main.go <dbfile> get <key>")
+		fmt.Println("  forgedb <dbfile> put <key> <value>")
+		fmt.Println("  forgedb <dbfile> get <key>")
+		fmt.Println("  forgedb <dbfile> scan")
 		os.Exit(1)
 	}
 
@@ -28,7 +29,7 @@ func main() {
 	switch cmd {
 	case "put":
 		if len(os.Args) != 5 {
-			fmt.Println("put <key> <value>")
+			fmt.Println("Usage: put <key> <value>")
 			os.Exit(1)
 		}
 		key := []byte(os.Args[3])
@@ -41,7 +42,7 @@ func main() {
 
 	case "get":
 		if len(os.Args) != 4 {
-			fmt.Println("get <key>")
+			fmt.Println("Usage: get <key>")
 			os.Exit(1)
 		}
 		key := []byte(os.Args[3])
@@ -52,7 +53,23 @@ func main() {
 			fmt.Println("not found")
 		}
 
+	case "scan":
+		// TODO: full scan (for now we just show last page content)
+		fmt.Println("=== Database Scan ===")
+		if db.NextPage > 1 {
+			lastID := db.NextPage - 1
+			p, err := db.ReadPage(lastID)
+			if err != nil {
+				fmt.Printf("Read failed: %v\n", err)
+			} else {
+				fmt.Print(p)
+			}
+		} else {
+			fmt.Println("Database is empty")
+		}
+
 	default:
-		fmt.Println("Unknown command: use put or get")
+		fmt.Println("Unknown command. Use: put, get, or scan")
+		os.Exit(1)
 	}
 }
