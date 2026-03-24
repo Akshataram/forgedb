@@ -30,26 +30,37 @@ func (p Page) SetHeader(typ uint16, nkeys uint16) {
 
 func (p Page) GetPtr(i uint16) uint16 {
 	pos := PtrTableStart + i*PtrEntrySize
+	if int(pos)+1 >= len(p) {
+		return 0
+	}
 	return binary.LittleEndian.Uint16(p[pos : pos+PtrEntrySize])
 }
 
 func (p Page) SetPtr(i uint16, offset uint16) {
 	pos := PtrTableStart + i*PtrEntrySize
+	if int(pos)+1 >= len(p) {
+		return
+	}
 	binary.LittleEndian.PutUint16(p[pos:pos+PtrEntrySize], offset)
 }
 
 func (p Page) GetKeyValueAt(i uint16) (key, value []byte) {
 	offset := int(p.GetPtr(i))
+	if offset+4 > PageSize {
+		return nil, nil
+	}
 	klen := binary.LittleEndian.Uint16(p[offset : offset+2])
 	vlen := binary.LittleEndian.Uint16(p[offset+2 : offset+4])
+	if offset+4+int(klen)+int(vlen) > PageSize {
+		return nil, nil
+	}
 	return p[offset+4 : offset+4+int(klen)], p[offset+4+int(klen) : offset+4+int(klen)+int(vlen)]
 }
 
 func (p Page) IsFull() bool {
-	return p.Nkeys() >= 400 // conservative limit for now
+	return p.Nkeys() >= 300
 }
 
-// Insert keeps keys sorted
 func (p Page) Insert(key, value []byte) bool {
 	if p.IsFull() {
 		return false
@@ -83,7 +94,7 @@ func (p Page) Insert(key, value []byte) bool {
 		vlen := int(binary.LittleEndian.Uint16(p[pos+2:pos+4]))
 		nextFree = pos + 4 + klen + vlen
 	} else {
-		nextFree = PtrTableStart + 1024
+		nextFree = PtrTableStart + 800
 	}
 
 	needed := 4 + len(key) + len(value)
@@ -108,6 +119,9 @@ func (p Page) Insert(key, value []byte) bool {
 
 func (p Page) updateValueAt(idx uint16, value []byte) {
 	off := int(p.GetPtr(idx))
+	if off + 4 > PageSize {
+		return
+	}
 	vlenPos := off + 2
 	binary.LittleEndian.PutUint16(p[vlenPos:vlenPos+2], uint16(len(value)))
 	copy(p[vlenPos+2 : vlenPos+2+len(value)], value)
@@ -115,10 +129,16 @@ func (p Page) updateValueAt(idx uint16, value []byte) {
 
 func (p Page) Get(key []byte) ([]byte, bool) {
 	n := p.Nkeys()
+	if n == 0 {
+		return nil, false
+	}
 	low, high := uint16(0), n-1
 	for low <= high {
 		mid := (low + high) / 2
 		k, v := p.GetKeyValueAt(mid)
+		if k == nil {
+			break
+		}
 		cmp := bytes.Compare(key, k)
 		if cmp == 0 {
 			return v, true
@@ -131,7 +151,6 @@ func (p Page) Get(key []byte) ([]byte, bool) {
 	return nil, false
 }
 
-// Split splits the leaf into two pages and returns the middle key to promote
 func (p Page) Split() (left, right Page, middleKey []byte) {
 	n := p.Nkeys()
 	splitPoint := n / 2
@@ -139,21 +158,16 @@ func (p Page) Split() (left, right Page, middleKey []byte) {
 	left = NewEmptyLeaf()
 	right = NewEmptyLeaf()
 
-	// Copy first half to left
 	for i := uint16(0); i < splitPoint; i++ {
 		k, v := p.GetKeyValueAt(i)
 		left.Insert(k, v)
 	}
-
-	// Copy second half to right
 	for i := splitPoint; i < n; i++ {
 		k, v := p.GetKeyValueAt(i)
 		right.Insert(k, v)
 	}
 
-	// Middle key to promote (first key of right page)
 	middleKey, _ = right.GetKeyValueAt(0)
-
 	return left, right, middleKey
 }
 

@@ -129,7 +129,7 @@ func (db *ForgeDB) Put(key, value []byte) error {
 	}
 
 	if rootPage.IsFull() {
-		left, right, _ := rootPage.Split()   // middle is ignored for now with _
+		left, right, _ := rootPage.Split()
 
 		leftID, _, _ := db.AllocPage()
 		rightID, _, _ := db.AllocPage()
@@ -137,12 +137,10 @@ func (db *ForgeDB) Put(key, value []byte) error {
 		db.WritePage(leftID, left)
 		db.WritePage(rightID, right)
 
-		// For now, make left the new root (we'll improve this later)
 		db.Root = leftID
 		db.saveMeta()
 
-		// Retry insert
-		return db.Put(key, value)
+		return db.Put(key, value) // retry
 	}
 
 	if !rootPage.Insert(key, value) {
