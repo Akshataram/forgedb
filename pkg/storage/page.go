@@ -155,19 +155,35 @@ func (p Page) Split() (left, right Page, middleKey []byte) {
 	n := p.Nkeys()
 	splitPoint := n / 2
 
-	left = NewEmptyLeaf()
-	right = NewEmptyLeaf()
+	if p.NodeType() == NodeTypeLeaf {
+		left = NewEmptyLeaf()
+		right = NewEmptyLeaf()
 
-	for i := uint16(0); i < splitPoint; i++ {
-		k, v := p.GetKeyValueAt(i)
-		left.Insert(k, v)
-	}
-	for i := splitPoint; i < n; i++ {
-		k, v := p.GetKeyValueAt(i)
-		right.Insert(k, v)
+		for i := uint16(0); i < splitPoint; i++ {
+			k, v := p.GetKeyValueAt(i)
+			left.Insert(k, v)
+		}
+		for i := splitPoint; i < n; i++ {
+			k, v := p.GetKeyValueAt(i)
+			right.Insert(k, v)
+		}
+		middleKey, _ = right.GetKeyValueAt(0)
+	} else {
+		// Branch node split
+		left = NewEmptyBranch()
+		right = NewEmptyBranch()
+
+		for i := uint16(0); i < splitPoint; i++ {
+			k, v := p.GetKeyValueAt(i)
+			left.Insert(k, v)
+		}
+		for i := splitPoint + 1; i < n; i++ {
+			k, v := p.GetKeyValueAt(i)
+			right.Insert(k, v)
+		}
+		middleKey, _ = p.GetKeyValueAt(splitPoint)
 	}
 
-	middleKey, _ = right.GetKeyValueAt(0)
 	return left, right, middleKey
 }
 
@@ -177,12 +193,30 @@ func NewEmptyLeaf() Page {
 	return p
 }
 
+func NewEmptyBranch() Page {
+	p := make(Page, PageSize)
+	p.SetHeader(NodeTypeBranch, 0)
+	return p
+}
+
 func (p Page) String() string {
 	n := p.Nkeys()
-	s := fmt.Sprintf("Page[type=%d, nkeys=%d]\n", p.NodeType(), n)
+	nodeType := "Leaf"
+	if p.NodeType() == NodeTypeBranch {
+		nodeType = "Branch"
+	}
+	s := fmt.Sprintf("Page[%s, nkeys=%d]\n", nodeType, n)
 	for i := uint16(0); i < n; i++ {
 		k, v := p.GetKeyValueAt(i)
-		s += fmt.Sprintf("  %d: %q → %q\n", i, k, v)
+		if p.NodeType() == NodeTypeBranch {
+			var childID uint64
+			if len(v) >= 8 {
+				binary.Read(bytes.NewReader(v), binary.LittleEndian, &childID)
+			}
+			s += fmt.Sprintf("  %d: %q → child=%d\n", i, k, childID)
+		} else {
+			s += fmt.Sprintf("  %d: %q → %q\n", i, k, v)
+		}
 	}
 	return s
 }
