@@ -308,3 +308,142 @@ func (db *ForgeDB) Get(key []byte) ([]byte, bool) {
 		pageID = childID
 	}
 }
+
+// KeyValue represents a key-value pair for scan operations
+type KeyValue struct {
+	Key   []byte
+	Value []byte
+}
+
+// Scan returns all keys in range [start, end). If start is nil, start from beginning.
+// If end is nil, go to the end.
+func (db *ForgeDB) Scan(start, end []byte) ([]KeyValue, error) {
+	var results []KeyValue
+	
+	// Find the starting leaf page
+	pageID := db.Root
+	var leafPage Page
+	
+	// Traverse to the appropriate leaf
+	for {
+		page, err := db.ReadPage(pageID)
+		if err != nil {
+			return nil, err
+		}
+		
+		if page.NodeType() == NodeTypeLeaf {
+			leafPage = page
+			break
+		}
+		
+		// Find child to traverse
+		n := page.Nkeys()
+		childIdx := uint16(0)
+		if start != nil {
+			for childIdx < n {
+				k, _ := page.GetKeyValueAt(childIdx)
+				if bytes.Compare(start, k) < 0 {
+					break
+				}
+				childIdx++
+			}
+		}
+		
+		var childID PageID
+		if childIdx < n {
+			val, _ := page.GetKeyValueAt(childIdx)
+			binary.Read(bytes.NewReader(val), binary.LittleEndian, &childID)
+		} else if n > 0 {
+			val, _ := page.GetKeyValueAt(n - 1)
+			binary.Read(bytes.NewReader(val), binary.LittleEndian, &childID)
+		}
+		pageID = childID
+	}
+	
+	// Scan leaf pages
+	n := leafPage.Nkeys()
+	for i := uint16(0); i < n; i++ {
+		key, value := leafPage.GetKeyValueAt(i)
+		
+		// Check range bounds
+		if start != nil && bytes.Compare(key, start) < 0 {
+			continue
+		}
+		if end != nil && bytes.Compare(key, end) >= 0 {
+			return results, nil
+		}
+		
+		results = append(results, KeyValue{Key: key, Value: value})
+	}
+	
+	return results, nil
+}
+
+// Stats returns database statistics
+type DBStats struct {
+	TotalPages  int
+	LeafPages   int
+	BranchPages int
+	TotalKeys   int
+	Height      int
+	FillRatio   float64
+}
+
+func (db *ForgeDB) Stats() (*DBStats, error) {
+	stats := &DBStats{
+		TotalPages: int(db.NextPage) - 1,
+	}
+	
+	// Traverse the tree and count
+	var countPages func(PageID, int) error
+	countPages = func(id PageID, depth int) error {
+		if id == 0 {
+			return nil
+		}
+		
+		page, err := db.ReadPage(id)
+		if err != nil {
+			return err
+		}
+		
+		if depth > stats.Height {
+			stats.Height = depth
+		}
+		
+		nkeys := page.Nkeys()
+		stats.TotalKeys += int(nkeys)
+		
+		if page.NodeType() == NodeTypeLeaf {
+			stats.LeafPages++
+			// Calculate fill ratio for leaf pages
+			if nkeys > 0 {
+				// Rough estimate: each leaf can hold up to 300 keys
+				stats.FillRatio += float64(nkeys) / 300.0 * 100.0
+			}
+		} else {
+			stats.BranchPages++
+			// Recursively count children
+			for i := uint16(0); i < nkeys; i++ {
+				val, _ := page.GetKeyValueAt(i)
+				var childID PageID
+				binary.Read(bytes.NewReader(val), binary.LittleEndian, &childID)
+				if err := countPages(childID, depth+1); err != nil {
+					return err
+				}
+			}
+		}
+		
+		return nil
+	}
+	
+	if err := countPages(db.Root, 0); err != nil {
+		return nil, err
+	}
+	
+	// Average fill ratio
+	if stats.LeafPages > 0 {
+		stats.FillRatio = stats.FillRatio / float64(stats.LeafPages)
+	}
+	
+	return stats, nil
+}
