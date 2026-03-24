@@ -140,7 +140,7 @@ func (db *ForgeDB) Put(key, value []byte) error {
 		db.Root = leftID
 		db.saveMeta()
 
-		return db.Put(key, value) // retry
+		return db.Put(key, value)
 	}
 
 	if !rootPage.Insert(key, value) {

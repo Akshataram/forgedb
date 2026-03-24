@@ -119,7 +119,7 @@ func (p Page) Insert(key, value []byte) bool {
 
 func (p Page) updateValueAt(idx uint16, value []byte) {
 	off := int(p.GetPtr(idx))
-	if off + 4 > PageSize {
+	if off+4 > PageSize {
 		return
 	}
 	vlenPos := off + 2
