@@ -32,16 +32,15 @@ func main() {
 			}
 			fmt.Printf("Allocated fresh page %d (initial nkeys=%d)\n", id, page.Nkeys())
 
-			added1 := page.AddEntry([]byte("name"), []byte("Akshata"))
-			added2 := page.AddEntry([]byte("city"), []byte("Vattalkundu"))
-			added3 := page.AddEntry([]byte("fruit"), []byte("mango"))
+			added1 := page.Insert([]byte("name"), []byte("Akshata"))
+			added2 := page.Insert([]byte("city"), []byte("Vattalkundu"))
+			added3 := page.Insert([]byte("fruit"), []byte("mango"))
 
-			fmt.Printf("AddEntry results: name=%v, city=%v, fruit=%v\n", added1, added2, added3)
-			fmt.Printf("After adds → nkeys=%d\n", page.Nkeys())
+			fmt.Printf("Insert results: name=%v, city=%v, fruit=%v\n", added1, added2, added3)
+			fmt.Printf("After inserts → nkeys=%d\n", page.Nkeys())
 
 			fmt.Printf("Page before save:\n%s\n", page)
 
-			// Save the page
 			offset := int64(id) * storage.PageSize
 			_, err = db.File.WriteAt(page, offset)
 			if err != nil {
@@ -76,7 +75,7 @@ func main() {
 		}
 	}
 
-	// Always show last page if exists
+	// Show last page
 	if db.NextPage > 1 {
 		lastID := db.NextPage - 1
 		p, err := db.ReadPage(lastID)
