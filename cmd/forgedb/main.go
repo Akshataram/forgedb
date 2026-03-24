@@ -13,6 +13,8 @@ func main() {
 		fmt.Println("  forgedb <dbfile> put <key> <value>")
 		fmt.Println("  forgedb <dbfile> get <key>")
 		fmt.Println("  forgedb <dbfile> scan")
+		fmt.Println("  forgedb <dbfile> range <start> <end>")
+		fmt.Println("  forgedb <dbfile> stats")
 		os.Exit(1)
 	}
 
@@ -54,22 +56,53 @@ func main() {
 		}
 
 	case "scan":
-		// TODO: full scan (for now we just show last page content)
-		fmt.Println("=== Database Scan ===")
-		if db.NextPage > 1 {
-			lastID := db.NextPage - 1
-			p, err := db.ReadPage(lastID)
-			if err != nil {
-				fmt.Printf("Read failed: %v\n", err)
-			} else {
-				fmt.Print(p)
-			}
-		} else {
-			fmt.Println("Database is empty")
+		results, err := db.Scan(nil, nil)
+		if err != nil {
+			fmt.Printf("Scan failed: %v\n", err)
+			os.Exit(1)
 		}
+		fmt.Println("=== Database Scan ===")
+		for _, kv := range results {
+			fmt.Printf("%q → %q\n", kv.Key, kv.Value)
+		}
+		fmt.Printf("Total: %d records\n", len(results))
+
+	case "range":
+		if len(os.Args) != 5 {
+			fmt.Println("Usage: range <start> <end>")
+			os.Exit(1)
+		}
+		start := []byte(os.Args[3])
+		end := []byte(os.Args[4])
+		results, err := db.Scan(start, end)
+		if err != nil {
+			fmt.Printf("Range scan failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("=== Range Scan [%q, %q] ===\n", start, end)
+		for _, kv := range results {
+			fmt.Printf("%q → %q\n", kv.Key, kv.Value)
+		}
+		fmt.Printf("Total: %d records\n", len(results))
+
+	case "stats":
+		stats, err := db.Stats()
+		if err != nil {
+			fmt.Printf("Stats failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("=== Database Statistics ===")
+		fmt.Printf("Database Path: %s\n", dbPath)
+		fmt.Printf("Total Pages: %d\n", stats.TotalPages)
+		fmt.Printf("Leaf Pages: %d\n", stats.LeafPages)
+		fmt.Printf("Branch Pages: %d\n", stats.BranchPages)
+		fmt.Printf("Total Keys: %d\n", stats.TotalKeys)
+		fmt.Printf("Tree Height: %d\n", stats.Height)
+		fmt.Printf("Fill Ratio: %.2f%%\n", stats.FillRatio)
+		fmt.Printf("Page Size: %d bytes\n", storage.PageSize)
 
 	default:
-		fmt.Println("Unknown command. Use: put, get, or scan")
+		fmt.Println("Unknown command. Use: put, get, scan, range, or stats")
 		os.Exit(1)
 	}
 }
