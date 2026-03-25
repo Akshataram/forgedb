@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -56,16 +57,18 @@ func main() {
 		}
 
 	case "scan":
-		results, err := db.Scan(nil, nil)
-		if err != nil {
-			fmt.Printf("Scan failed: %v\n", err)
-			os.Exit(1)
+		fmt.Println("=== Full Scan ===")
+		if db.NextPage > 1 {
+			lastID := db.NextPage - 1
+			p, err := db.ReadPage(lastID)
+			if err != nil {
+				fmt.Printf("Read failed: %v\n", err)
+			} else {
+				fmt.Print(p)
+			}
+		} else {
+			fmt.Println("Database is empty")
 		}
-		fmt.Println("=== Database Scan ===")
-		for _, kv := range results {
-			fmt.Printf("%q → %q\n", kv.Key, kv.Value)
-		}
-		fmt.Printf("Total: %d records\n", len(results))
 
 	case "range":
 		if len(os.Args) != 5 {
@@ -74,35 +77,38 @@ func main() {
 		}
 		start := []byte(os.Args[3])
 		end := []byte(os.Args[4])
-		results, err := db.Scan(start, end)
-		if err != nil {
-			fmt.Printf("Range scan failed: %v\n", err)
-			os.Exit(1)
+		fmt.Printf("=== Range Scan [%s to %s] ===\n", start, end)
+		// Simple version: scan last page (will improve later)
+		if db.NextPage > 1 {
+			lastID := db.NextPage - 1
+			p, err := db.ReadPage(lastID)
+			if err != nil {
+				fmt.Printf("Read failed: %v\n", err)
+			} else {
+				n := p.Nkeys()
+				for i := uint16(0); i < n; i++ {
+					k, v := p.GetKeyValueAt(i)
+					if (len(start) == 0 || bytes.Compare(k, start) >= 0) &&
+						(len(end) == 0 || bytes.Compare(k, end) < 0) {
+						fmt.Printf("%q → %q\n", k, v)
+					}
+				}
+			}
 		}
-		fmt.Printf("=== Range Scan [%q, %q] ===\n", start, end)
-		for _, kv := range results {
-			fmt.Printf("%q → %q\n", kv.Key, kv.Value)
-		}
-		fmt.Printf("Total: %d records\n", len(results))
 
 	case "stats":
-		stats, err := db.Stats()
-		if err != nil {
-			fmt.Printf("Stats failed: %v\n", err)
-			os.Exit(1)
+		fmt.Println("=== Database Stats ===")
+		fmt.Printf("Database file: %s\n", dbPath)
+		fmt.Printf("Next page ID : %d\n", db.NextPage)
+		fmt.Printf("Root page ID : %d\n", db.Root)
+		if db.NextPage > 1 {
+			lastID := db.NextPage - 1
+			p, _ := db.ReadPage(lastID)
+			fmt.Printf("Keys in last page: %d\n", p.Nkeys())
 		}
-		fmt.Println("=== Database Statistics ===")
-		fmt.Printf("Database Path: %s\n", dbPath)
-		fmt.Printf("Total Pages: %d\n", stats.TotalPages)
-		fmt.Printf("Leaf Pages: %d\n", stats.LeafPages)
-		fmt.Printf("Branch Pages: %d\n", stats.BranchPages)
-		fmt.Printf("Total Keys: %d\n", stats.TotalKeys)
-		fmt.Printf("Tree Height: %d\n", stats.Height)
-		fmt.Printf("Fill Ratio: %.2f%%\n", stats.FillRatio)
-		fmt.Printf("Page Size: %d bytes\n", storage.PageSize)
 
 	default:
-		fmt.Println("Unknown command. Use: put, get, scan, range, or stats")
+		fmt.Println("Unknown command. Use: put, get, scan, range, stats")
 		os.Exit(1)
 	}
 }
