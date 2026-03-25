@@ -90,8 +90,8 @@ func (p Page) Insert(key, value []byte) bool {
 			}
 		}
 		pos := int(highest)
-		klen := int(binary.LittleEndian.Uint16(p[pos:pos+2]))
-		vlen := int(binary.LittleEndian.Uint16(p[pos+2:pos+4]))
+		klen := int(binary.LittleEndian.Uint16(p[pos : pos+2]))
+		vlen := int(binary.LittleEndian.Uint16(p[pos+2 : pos+4]))
 		nextFree = pos + 4 + klen + vlen
 	} else {
 		nextFree = PtrTableStart + 800
@@ -124,7 +124,7 @@ func (p Page) updateValueAt(idx uint16, value []byte) {
 	}
 	vlenPos := off + 2
 	binary.LittleEndian.PutUint16(p[vlenPos:vlenPos+2], uint16(len(value)))
-	copy(p[vlenPos+2 : vlenPos+2+len(value)], value)
+	copy(p[vlenPos+2:vlenPos+2+len(value)], value)
 }
 
 func (p Page) Get(key []byte) ([]byte, bool) {
@@ -151,39 +151,34 @@ func (p Page) Get(key []byte) ([]byte, bool) {
 	return nil, false
 }
 
+// GetChild returns the child page ID at index i (for branch nodes)
+func (p Page) GetChild(i uint16) PageID {
+	if p.NodeType() != NodeTypeBranch {
+		return 0
+	}
+	_, value := p.GetKeyValueAt(i)
+	if len(value) < 8 {
+		return 0
+	}
+	return PageID(binary.LittleEndian.Uint64(value))
+}
 func (p Page) Split() (left, right Page, middleKey []byte) {
 	n := p.Nkeys()
 	splitPoint := n / 2
 
-	if p.NodeType() == NodeTypeLeaf {
-		left = NewEmptyLeaf()
-		right = NewEmptyLeaf()
+	left = NewEmptyLeaf()
+	right = NewEmptyLeaf()
 
-		for i := uint16(0); i < splitPoint; i++ {
-			k, v := p.GetKeyValueAt(i)
-			left.Insert(k, v)
-		}
-		for i := splitPoint; i < n; i++ {
-			k, v := p.GetKeyValueAt(i)
-			right.Insert(k, v)
-		}
-		middleKey, _ = right.GetKeyValueAt(0)
-	} else {
-		// Branch node split
-		left = NewEmptyBranch()
-		right = NewEmptyBranch()
-
-		for i := uint16(0); i < splitPoint; i++ {
-			k, v := p.GetKeyValueAt(i)
-			left.Insert(k, v)
-		}
-		for i := splitPoint + 1; i < n; i++ {
-			k, v := p.GetKeyValueAt(i)
-			right.Insert(k, v)
-		}
-		middleKey, _ = p.GetKeyValueAt(splitPoint)
+	for i := uint16(0); i < splitPoint; i++ {
+		k, v := p.GetKeyValueAt(i)
+		left.Insert(k, v)
+	}
+	for i := splitPoint; i < n; i++ {
+		k, v := p.GetKeyValueAt(i)
+		right.Insert(k, v)
 	}
 
+	middleKey, _ = right.GetKeyValueAt(0)
 	return left, right, middleKey
 }
 
@@ -208,15 +203,7 @@ func (p Page) String() string {
 	s := fmt.Sprintf("Page[%s, nkeys=%d]\n", nodeType, n)
 	for i := uint16(0); i < n; i++ {
 		k, v := p.GetKeyValueAt(i)
-		if p.NodeType() == NodeTypeBranch {
-			var childID uint64
-			if len(v) >= 8 {
-				binary.Read(bytes.NewReader(v), binary.LittleEndian, &childID)
-			}
-			s += fmt.Sprintf("  %d: %q → child=%d\n", i, k, childID)
-		} else {
-			s += fmt.Sprintf("  %d: %q → %q\n", i, k, v)
-		}
+		s += fmt.Sprintf("  %d: %q → %q\n", i, k, v)
 	}
 	return s
 }
