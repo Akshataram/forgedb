@@ -25,9 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-
 	cmd := os.Args[2]
-
 	switch cmd {
 	case "put":
 		if len(os.Args) != 5 {
@@ -38,6 +36,18 @@ func main() {
 		value := []byte(os.Args[4])
 		if err := db.Put(key, value); err != nil {
 			fmt.Printf("Put failed: %v\n", err)
+		} else {
+			fmt.Println("OK")
+		}
+
+	case "delete":
+		if len(os.Args) != 4 {
+			fmt.Println("Usage: delete <key>")
+			os.Exit(1)
+		}
+		key := []byte(os.Args[3])
+		if err := db.Delete(key); err != nil {
+			fmt.Printf("Delete failed: %v\n", err)
 		} else {
 			fmt.Println("OK")
 		}

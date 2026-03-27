@@ -301,6 +301,40 @@ func (db *ForgeDB) get(pageID PageID, key []byte) ([]byte, bool) {
 	return db.get(childID, key)
 }
 
+func (db *ForgeDB) Delete(key []byte) error {
+	return db.delete(db.Root, key)
+}
+
+func (db *ForgeDB) delete(pageID PageID, key []byte) error {
+	p, err := db.ReadPage(pageID)
+	if err != nil {
+		return err
+	}
+
+	if p.NodeType() == NodeTypeLeaf {
+		if p.Delete(key) {
+			db.WritePage(pageID, p)
+		}
+		return nil
+	}
+
+	n := p.Nkeys()
+	childIdx := uint16(0)
+	for childIdx < n {
+		k, _ := p.GetKeyValueAt(childIdx)
+		if len(k) > 0 && bytes.Compare(key, k) < 0 {
+			break
+		}
+		childIdx++
+	}
+
+	if childIdx > 0 {
+		childIdx--
+	}
+	childID := p.GetChild(childIdx)
+	return db.delete(childID, key)
+}
+
 func (db *ForgeDB) findLeaf(pageID PageID, key []byte) (PageID, Page, error) {
 	p, err := db.ReadPage(pageID)
 	if err != nil {

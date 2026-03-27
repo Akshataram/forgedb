@@ -176,12 +176,56 @@ func (p Page) Get(key []byte) ([]byte, bool) {
 		if cmp == 0 {
 			return v, true
 		} else if cmp < 0 {
+			if mid == 0 {
+				break
+			}
 			high = mid - 1
 		} else {
 			low = mid + 1
 		}
 	}
 	return nil, false
+}
+
+// Delete removes a key from the page's pointer table. (Fragmentation is unhandled for now).
+func (p Page) Delete(key []byte) bool {
+	n := p.Nkeys()
+	if n == 0 {
+		return false
+	}
+
+	low, high := uint16(0), n-1
+	foundIdx := -1
+	for low <= high {
+		mid := (low + high) / 2
+		k, _ := p.GetKeyValueAt(mid)
+		if k == nil {
+			break
+		}
+		cmp := bytes.Compare(key, k)
+		if cmp == 0 {
+			foundIdx = int(mid)
+			break
+		} else if cmp < 0 {
+			if mid == 0 {
+				break
+			}
+			high = mid - 1
+		} else {
+			low = mid + 1
+		}
+	}
+
+	if foundIdx == -1 {
+		return false
+	}
+
+	for i := uint16(foundIdx); i < n-1; i++ {
+		p.SetPtr(i, p.GetPtr(i+1))
+	}
+	p.SetPtr(n-1, 0)
+	p.SetHeader(p.NodeType(), n-1)
+	return true
 }
 
 // GetChild returns the child page ID at index i (for branch nodes)
