@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 
@@ -58,16 +57,12 @@ func main() {
 
 	case "scan":
 		fmt.Println("=== Full Scan ===")
-		if db.NextPage > 1 {
-			lastID := db.NextPage - 1
-			p, err := db.ReadPage(lastID)
-			if err != nil {
-				fmt.Printf("Read failed: %v\n", err)
-			} else {
-				fmt.Print(p)
-			}
-		} else {
-			fmt.Println("Database is empty")
+		err := db.RangeScan(nil, nil, func(k, v []byte) bool {
+			fmt.Printf("%q → %q\n", k, v)
+			return true
+		})
+		if err != nil && err.Error() != "stopped" {
+			fmt.Printf("Scan failed: %v\n", err)
 		}
 
 	case "range":
@@ -78,22 +73,13 @@ func main() {
 		start := []byte(os.Args[3])
 		end := []byte(os.Args[4])
 		fmt.Printf("=== Range Scan [%s to %s] ===\n", start, end)
-		// Simple version: scan last page (will improve later)
-		if db.NextPage > 1 {
-			lastID := db.NextPage - 1
-			p, err := db.ReadPage(lastID)
-			if err != nil {
-				fmt.Printf("Read failed: %v\n", err)
-			} else {
-				n := p.Nkeys()
-				for i := uint16(0); i < n; i++ {
-					k, v := p.GetKeyValueAt(i)
-					if (len(start) == 0 || bytes.Compare(k, start) >= 0) &&
-						(len(end) == 0 || bytes.Compare(k, end) < 0) {
-						fmt.Printf("%q → %q\n", k, v)
-					}
-				}
-			}
+
+		err := db.RangeScan(start, end, func(k, v []byte) bool {
+			fmt.Printf("%q → %q\n", k, v)
+			return true
+		})
+		if err != nil && err.Error() != "stopped" {
+			fmt.Printf("Range scan failed: %v\n", err)
 		}
 
 	case "stats":
