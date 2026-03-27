@@ -158,22 +158,19 @@ func (db *ForgeDB) insert(pageID PageID, key, value []byte) (PageID, []byte, Pag
 		// Split the leaf
 		left, right, middleKey := page.Split()
 
-		leftID, _, _ := db.AllocPage()
-		rightID, _, _ := db.AllocPage()
-
-		db.WritePage(leftID, left)
-		db.WritePage(rightID, right)
+		rightIDLeaf, _, _ := db.AllocPage()
 
 		// Insert the new key into the correct child
 		if bytes.Compare(key, middleKey) < 0 {
 			left.Insert(key, value)
-			db.WritePage(leftID, left)
 		} else {
 			right.Insert(key, value)
-			db.WritePage(rightID, right)
 		}
 
-		return leftID, middleKey, rightID, nil
+		db.WritePage(pageID, left)
+		db.WritePage(rightIDLeaf, right)
+
+		return pageID, middleKey, rightIDLeaf, nil
 	}
 
 	// Internal (branch) node - find which child to go to
@@ -181,17 +178,17 @@ func (db *ForgeDB) insert(pageID PageID, key, value []byte) (PageID, []byte, Pag
 	childIdx := uint16(0)
 	for childIdx < n {
 		k, _ := page.GetKeyValueAt(childIdx)
-		if bytes.Compare(key, k) < 0 {
+		if len(k) > 0 && bytes.Compare(key, k) < 0 {
 			break
 		}
 		childIdx++
 	}
 
 	var childID PageID
-	if childIdx < n {
-		childID = page.GetChild(childIdx)
-	} else if n > 0 {
-		childID = page.GetChild(n - 1)
+	if childIdx > 0 {
+		childID = page.GetChild(childIdx - 1)
+	} else {
+		childID = page.GetChild(0)
 	}
 
 	// Recurse into the child
@@ -213,8 +210,25 @@ func (db *ForgeDB) insert(pageID PageID, key, value []byte) (PageID, []byte, Pag
 		return 0, nil, 0, nil
 	}
 
-	// If internal node is full, it will split too (future improvement)
-	return 0, nil, 0, fmt.Errorf("internal node full - split not yet implemented")
+	// Internal node is full, split it
+	left, right, middleKey := page.Split()
+
+	rightIDBranch, _, _ := db.AllocBranch()
+
+	if bytes.Compare(splitKey, middleKey) < 0 {
+		var buf bytes.Buffer
+		binary.Write(&buf, binary.LittleEndian, uint64(rightID))
+		left.Insert(splitKey, buf.Bytes())
+	} else {
+		var buf bytes.Buffer
+		binary.Write(&buf, binary.LittleEndian, uint64(rightID))
+		right.Insert(splitKey, buf.Bytes())
+	}
+
+	db.WritePage(pageID, left)
+	db.WritePage(rightIDBranch, right)
+
+	return pageID, middleKey, rightIDBranch, nil
 }
 
 // Put inserts a key-value pair with recursive split support
@@ -226,20 +240,19 @@ func (db *ForgeDB) Put(key, value []byte) error {
 
 	if rightID != 0 {
 		// Create new root as branch node
-		newRoot := NewEmptyBranch()
-
-		var buf1 bytes.Buffer
-		binary.Write(&buf1, binary.LittleEndian, uint64(leftID))
-		newRoot.Insert(splitKey, buf1.Bytes())
-
-		var buf2 bytes.Buffer
-		binary.Write(&buf2, binary.LittleEndian, uint64(rightID))
-		newRoot.Insert(splitKey, buf2.Bytes())
-
-		newRootID, _, err := db.AllocPage()
+		newRootID, newRoot, err := db.AllocBranch()
 		if err != nil {
 			return err
 		}
+
+		var buf1 bytes.Buffer
+		binary.Write(&buf1, binary.LittleEndian, uint64(leftID))
+		newRoot.Insert(nil, buf1.Bytes()) // Left child gets an empty key
+
+		var buf2 bytes.Buffer
+		binary.Write(&buf2, binary.LittleEndian, uint64(rightID))
+		newRoot.Insert(splitKey, buf2.Bytes()) // Right child gets the splitKey
+
 		db.WritePage(newRootID, newRoot)
 
 		db.Root = newRootID
@@ -250,9 +263,36 @@ func (db *ForgeDB) Put(key, value []byte) error {
 }
 
 func (db *ForgeDB) Get(key []byte) ([]byte, bool) {
-	p, err := db.ReadPage(db.Root)
+	return db.get(db.Root, key)
+}
+
+func (db *ForgeDB) get(pageID PageID, key []byte) ([]byte, bool) {
+	p, err := db.ReadPage(pageID)
 	if err != nil {
 		return nil, false
 	}
-	return p.Get(key)
+
+	if p.NodeType() == NodeTypeLeaf {
+		return p.Get(key)
+	}
+
+	n := p.Nkeys()
+	if n == 0 {
+		return nil, false
+	}
+
+	childIdx := uint16(0)
+	for childIdx < n {
+		k, _ := p.GetKeyValueAt(childIdx)
+		if len(k) > 0 && bytes.Compare(key, k) < 0 {
+			break
+		}
+		childIdx++
+	}
+
+	if childIdx > 0 {
+		childIdx--
+	}
+	childID := p.GetChild(childIdx)
+	return db.get(childID, key)
 }

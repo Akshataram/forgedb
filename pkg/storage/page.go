@@ -166,8 +166,13 @@ func (p Page) Split() (left, right Page, middleKey []byte) {
 	n := p.Nkeys()
 	splitPoint := n / 2
 
-	left = NewEmptyLeaf()
-	right = NewEmptyLeaf()
+	if p.NodeType() == NodeTypeLeaf {
+		left = NewEmptyLeaf()
+		right = NewEmptyLeaf()
+	} else {
+		left = NewEmptyBranch()
+		right = NewEmptyBranch()
+	}
 
 	for i := uint16(0); i < splitPoint; i++ {
 		k, v := p.GetKeyValueAt(i)
