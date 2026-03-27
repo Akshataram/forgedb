@@ -8,8 +8,8 @@ import (
 
 const (
 	PageSize      = 4096
-	HeaderSize    = 4
-	PtrTableStart = 8
+	HeaderSize    = 12
+	PtrTableStart = 16
 	PtrEntrySize  = 2
 )
 
@@ -22,6 +22,19 @@ type Page []byte
 
 func (p Page) NodeType() uint16 { return binary.LittleEndian.Uint16(p[0:2]) }
 func (p Page) Nkeys() uint16    { return binary.LittleEndian.Uint16(p[2:4]) }
+
+func (p Page) NextPage() PageID {
+	if p.NodeType() != NodeTypeLeaf {
+		return 0
+	}
+	return PageID(binary.LittleEndian.Uint64(p[4:12]))
+}
+
+func (p Page) SetNextPage(id PageID) {
+	if p.NodeType() == NodeTypeLeaf {
+		binary.LittleEndian.PutUint64(p[4:12], uint64(id))
+	}
+}
 
 func (p Page) SetHeader(typ uint16, nkeys uint16) {
 	binary.LittleEndian.PutUint16(p[0:2], typ)
@@ -58,7 +71,27 @@ func (p Page) GetKeyValueAt(i uint16) (key, value []byte) {
 }
 
 func (p Page) IsFull() bool {
-	return p.Nkeys() >= 300
+	n := p.Nkeys()
+	if n >= 250 {
+		return true
+	}
+
+	nextFree := PageSize
+	if n > 0 {
+		highest := uint16(0)
+		for i := uint16(0); i < n; i++ {
+			if ptr := p.GetPtr(i); ptr > highest {
+				highest = ptr
+			}
+		}
+		pos := int(highest)
+		klen := int(binary.LittleEndian.Uint16(p[pos : pos+2]))
+		vlen := int(binary.LittleEndian.Uint16(p[pos+2 : pos+4]))
+		nextFree = pos + 4 + klen + vlen
+	} else {
+		nextFree = PtrTableStart + 800
+	}
+	return nextFree+128 >= PageSize
 }
 
 func (p Page) Insert(key, value []byte) bool {

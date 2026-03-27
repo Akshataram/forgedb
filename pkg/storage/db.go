@@ -160,6 +160,10 @@ func (db *ForgeDB) insert(pageID PageID, key, value []byte) (PageID, []byte, Pag
 
 		rightIDLeaf, _, _ := db.AllocPage()
 
+		// Setting up linked list
+		right.SetNextPage(page.NextPage())
+		left.SetNextPage(rightIDLeaf)
+
 		// Insert the new key into the correct child
 		if bytes.Compare(key, middleKey) < 0 {
 			left.Insert(key, value)
@@ -297,24 +301,47 @@ func (db *ForgeDB) get(pageID PageID, key []byte) ([]byte, bool) {
 	return db.get(childID, key)
 }
 
-// RangeScan traverses the B+Tree and retrieves all key-value pairs between start (inclusive) and end (exclusive).
-// Passing nil for start or end behaves as unbounded in that direction.
-func (db *ForgeDB) RangeScan(start, end []byte, cb func(k, v []byte) bool) error {
-	return db.rangeScan(db.Root, start, end, cb)
-}
-
-func (db *ForgeDB) rangeScan(pageID PageID, start, end []byte, cb func(k, v []byte) bool) error {
+func (db *ForgeDB) findLeaf(pageID PageID, key []byte) (PageID, Page, error) {
 	p, err := db.ReadPage(pageID)
 	if err != nil {
-		return err
+		return 0, nil, err
+	}
+
+	if p.NodeType() == NodeTypeLeaf {
+		return pageID, p, nil
 	}
 
 	n := p.Nkeys()
 	if n == 0 {
-		return nil
+		return 0, nil, fmt.Errorf("empty branch node")
 	}
 
-	if p.NodeType() == NodeTypeLeaf {
+	childIdx := uint16(0)
+	for childIdx < n {
+		k, _ := p.GetKeyValueAt(childIdx)
+		if len(k) > 0 && bytes.Compare(key, k) < 0 {
+			break
+		}
+		childIdx++
+	}
+
+	if childIdx > 0 {
+		childIdx--
+	}
+	childID := p.GetChild(childIdx)
+	return db.findLeaf(childID, key)
+}
+
+// RangeScan traverses the B+Tree and retrieves all key-value pairs between start (inclusive) and end (exclusive).
+// Passing nil for start or end behaves as unbounded in that direction.
+func (db *ForgeDB) RangeScan(start, end []byte, cb func(k, v []byte) bool) error {
+	_, p, err := db.findLeaf(db.Root, start)
+	if err != nil {
+		return err
+	}
+
+	for {
+		n := p.Nkeys()
 		for i := uint16(0); i < n; i++ {
 			k, v := p.GetKeyValueAt(i)
 			if len(start) > 0 && bytes.Compare(k, start) < 0 {
@@ -327,36 +354,15 @@ func (db *ForgeDB) rangeScan(pageID PageID, start, end []byte, cb func(k, v []by
 				return fmt.Errorf("stopped")
 			}
 		}
-		return nil
-	}
 
-	// Branch node: find overlapping children
-	for i := uint16(0); i < n; i++ {
-		k, _ := p.GetKeyValueAt(i)
-
-		// Over-bounds check: if this child's separator is >= the end bound,
-		// everything in this child and beyond is >= end. We can break.
-		if len(end) > 0 && len(k) > 0 && bytes.Compare(k, end) >= 0 {
+		nextID := p.NextPage()
+		if nextID == 0 {
 			break
 		}
-
-		// Under-bounds check: if the next child's separator is <= our start bound,
-		// this child solely contains keys strictly < our start bound. We can skip it.
-		if i+1 < n {
-			kNext, _ := p.GetKeyValueAt(i + 1)
-			if len(start) > 0 && len(kNext) > 0 && bytes.Compare(kNext, start) <= 0 {
-				continue
-			}
-		}
-
-		err := db.rangeScan(p.GetChild(i), start, end, cb)
+		p, err = db.ReadPage(nextID)
 		if err != nil {
-			if err.Error() == "stopped" {
-				return err
-			}
 			return err
 		}
 	}
-
 	return nil
 }
