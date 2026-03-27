@@ -228,6 +228,24 @@ func (p Page) Delete(key []byte) bool {
 	return true
 }
 
+// Compact rebuilds the page to reclaim fragmented space left by Delete.
+func (p Page) Compact() Page {
+	var newPage Page
+	if p.NodeType() == NodeTypeLeaf {
+		newPage = NewEmptyLeaf()
+		newPage.SetNextPage(p.NextPage())
+	} else {
+		newPage = NewEmptyBranch()
+	}
+
+	n := p.Nkeys()
+	for i := uint16(0); i < n; i++ {
+		k, v := p.GetKeyValueAt(i)
+		newPage.Insert(k, v)
+	}
+	return newPage
+}
+
 // GetChild returns the child page ID at index i (for branch nodes)
 func (p Page) GetChild(i uint16) PageID {
 	if p.NodeType() != NodeTypeBranch {

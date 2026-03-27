@@ -302,20 +302,30 @@ func (db *ForgeDB) get(pageID PageID, key []byte) ([]byte, bool) {
 }
 
 func (db *ForgeDB) Delete(key []byte) error {
-	return db.delete(db.Root, key)
-}
-
-func (db *ForgeDB) delete(pageID PageID, key []byte) error {
-	p, err := db.ReadPage(pageID)
+	_, err := db.delete(db.Root, key)
 	if err != nil {
 		return err
+	}
+
+	rootPage, _ := db.ReadPage(db.Root)
+	if rootPage.NodeType() == NodeTypeBranch && rootPage.Nkeys() == 1 {
+		db.Root = rootPage.GetChild(0)
+		db.saveMeta()
+	}
+	return nil
+}
+
+func (db *ForgeDB) delete(pageID PageID, key []byte) (bool, error) {
+	p, err := db.ReadPage(pageID)
+	if err != nil {
+		return false, err
 	}
 
 	if p.NodeType() == NodeTypeLeaf {
 		if p.Delete(key) {
 			db.WritePage(pageID, p)
 		}
-		return nil
+		return p.Nkeys() < 100, nil
 	}
 
 	n := p.Nkeys()
@@ -332,7 +342,77 @@ func (db *ForgeDB) delete(pageID PageID, key []byte) error {
 		childIdx--
 	}
 	childID := p.GetChild(childIdx)
-	return db.delete(childID, key)
+
+	underflow, err := db.delete(childID, key)
+	if err != nil {
+		return false, err
+	}
+
+	if underflow {
+		db.handleUnderflow(p, childIdx, pageID)
+		return p.Nkeys() < 100, nil
+	}
+
+	return false, nil
+}
+
+func (db *ForgeDB) handleUnderflow(parent Page, childIdx uint16, parentID PageID) error {
+	childID := parent.GetChild(childIdx)
+	child, _ := db.ReadPage(childID)
+	n := parent.Nkeys()
+
+	// Try left sibling merge
+	if childIdx > 0 {
+		siblingID := parent.GetChild(childIdx - 1)
+		sibling, _ := db.ReadPage(siblingID)
+
+		if sibling.Nkeys()+child.Nkeys() <= 280 {
+			sibling = sibling.Compact()
+			for i := uint16(0); i < child.Nkeys(); i++ {
+				k, v := child.GetKeyValueAt(i)
+				if !sibling.Insert(k, v) {
+					// Physical space overflow during merge - cannot merge
+					return nil
+				}
+			}
+			if child.NodeType() == NodeTypeLeaf {
+				sibling.SetNextPage(child.NextPage())
+			}
+			db.WritePage(siblingID, sibling)
+
+			sepKey, _ := parent.GetKeyValueAt(childIdx)
+			parent.Delete(sepKey)
+			db.WritePage(parentID, parent)
+			return nil
+		}
+	}
+
+	// Try right sibling merge
+	if childIdx+1 < n {
+		siblingID := parent.GetChild(childIdx + 1)
+		sibling, _ := db.ReadPage(siblingID)
+
+		if child.Nkeys()+sibling.Nkeys() <= 280 {
+			child = child.Compact()
+			for i := uint16(0); i < sibling.Nkeys(); i++ {
+				k, v := sibling.GetKeyValueAt(i)
+				if !child.Insert(k, v) {
+					return nil
+				}
+			}
+			if child.NodeType() == NodeTypeLeaf {
+				child.SetNextPage(sibling.NextPage())
+			}
+			db.WritePage(childID, child)
+
+			sepKey, _ := parent.GetKeyValueAt(childIdx + 1)
+			parent.Delete(sepKey)
+			db.WritePage(parentID, parent)
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (db *ForgeDB) findLeaf(pageID PageID, key []byte) (PageID, Page, error) {
