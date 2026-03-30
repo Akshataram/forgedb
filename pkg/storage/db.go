@@ -10,10 +10,12 @@ import (
 type PageID uint64
 
 type ForgeDB struct {
-	Path     string
-	File     *os.File
-	NextPage PageID
-	Root     PageID
+	Path         string
+	File         *os.File
+	NextPage     PageID
+	Root         PageID
+	wal          *WAL
+	isRecovering bool
 }
 
 func Open(path string) (*ForgeDB, error) {
@@ -22,11 +24,19 @@ func Open(path string) (*ForgeDB, error) {
 		return nil, err
 	}
 
+	walPath := path + ".wal"
+	w, err := OpenWAL(walPath)
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+
 	db := &ForgeDB{
 		Path:     path,
 		File:     f,
 		NextPage: 1,
 		Root:     1,
+		wal:      w,
 	}
 
 	stat, _ := f.Stat()
@@ -46,10 +56,21 @@ func Open(path string) (*ForgeDB, error) {
 		}
 	}
 
+	// Replay WAL for crash recovery
+	db.isRecovering = true
+	if err := db.wal.Replay(db.Put, db.Delete); err != nil {
+		fmt.Printf("Warning: partial WAL replay failure - %v\n", err)
+	}
+	db.isRecovering = false
+
+	// Truncate WAL after successful recovery, as tree is now fully flushed
+	db.wal.Clear()
+
 	return db, nil
 }
 
 func (db *ForgeDB) Close() error {
+	db.wal.Close()
 	return db.File.Close()
 }
 
@@ -237,6 +258,12 @@ func (db *ForgeDB) insert(pageID PageID, key, value []byte) (PageID, []byte, Pag
 
 // Put inserts a key-value pair with recursive split support
 func (db *ForgeDB) Put(key, value []byte) error {
+	if !db.isRecovering {
+		if err := db.wal.AppendPut(key, value); err != nil {
+			return err
+		}
+	}
+
 	leftID, splitKey, rightID, err := db.insert(db.Root, key, value)
 	if err != nil {
 		return err
@@ -302,6 +329,12 @@ func (db *ForgeDB) get(pageID PageID, key []byte) ([]byte, bool) {
 }
 
 func (db *ForgeDB) Delete(key []byte) error {
+	if !db.isRecovering {
+		if err := db.wal.AppendDelete(key); err != nil {
+			return err
+		}
+	}
+
 	_, err := db.delete(db.Root, key)
 	if err != nil {
 		return err

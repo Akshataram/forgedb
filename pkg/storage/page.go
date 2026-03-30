@@ -108,7 +108,39 @@ func (p Page) Insert(key, value []byte) bool {
 			break
 		}
 		if cmp == 0 {
-			p.updateValueAt(i, value)
+			off := int(p.GetPtr(i))
+			oldVlen := int(binary.LittleEndian.Uint16(p[off+2 : off+4]))
+			if len(value) <= oldVlen {
+				vlenPos := off + 2
+				binary.LittleEndian.PutUint16(p[vlenPos:vlenPos+2], uint16(len(value)))
+				copy(p[vlenPos+2:vlenPos+2+len(value)], value)
+				return true
+			}
+
+			// Value is larger, must append to end of free space to avoid corrupting adjacent keys!
+			highest := uint16(0)
+			for j := uint16(0); j < n; j++ {
+				if ptr := p.GetPtr(j); ptr > highest {
+					highest = ptr
+				}
+			}
+			pos := int(highest)
+			klen := int(binary.LittleEndian.Uint16(p[pos : pos+2]))
+			vlen := int(binary.LittleEndian.Uint16(p[pos+2 : pos+4]))
+			nextFree := pos + 4 + klen + vlen
+
+			needed := 4 + len(key) + len(value)
+			if nextFree+needed > PageSize {
+				return false // Not enough space; reject it to trigger split
+			}
+
+			offset := nextFree
+			binary.LittleEndian.PutUint16(p[offset:offset+2], uint16(len(key)))
+			binary.LittleEndian.PutUint16(p[offset+2:offset+4], uint16(len(value)))
+			copy(p[offset+4:offset+4+len(key)], key)
+			copy(p[offset+4+len(key):offset+4+len(key)+len(value)], value)
+
+			p.SetPtr(i, uint16(offset))
 			return true
 		}
 		insertPos++

@@ -1,0 +1,5 @@
+forgedb
+*.db
+*.wal
+*.patch
+*.save
